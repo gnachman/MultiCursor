@@ -6,11 +6,6 @@
 
 import AppKit
 
-func DLog(_ messageBlock: @autoclosure () -> String, file: String = #file, line: Int = #line, function: String = #function) {
-    let message = messageBlock()
-    print("\(file):\(line) \(function): \(message)")
-}
-
 fileprivate struct Drag {
     let start: NSPoint
     var end: NSPoint?
@@ -29,61 +24,18 @@ fileprivate struct Drag {
     }
 }
 
-extension NSPoint {
-    func retinaRound(_ scale: CGFloat) -> NSPoint {
-        return NSPoint(x: round(x * scale) / scale, y: round(y * scale) / scale)
-    }
-}
-
-extension NSSize {
-    func retinaRound(_ scale: CGFloat) -> NSSize {
-        return NSSize(width: round(width * scale) / scale, height: round(height * scale) / scale)
-    }
-}
-
-extension NSRect {
-    var withPositiveWidth: NSRect {
-        if width > 0 {
-            return self
-        }
-        var temp = self
-        temp.size.width = 1
-        return temp
-    }
-
-    var terminus: NSPoint {
-        return NSPoint(x: maxX, y: maxY)
-    }
-    var neighborBelow: NSRect {
-        // A same-size rect just under us (larger Y)
-        return NSRect(x: minX, y: maxY, width: width, height: height)
-    }
-    var maxPointWithinRect: NSPoint {
-        return NSPoint(x: maxX - 1, y: maxY - 1)
-    }
-
-    func retinaRound(_ scale: CGFloat?) -> NSRect {
-        return NSRect(origin: origin.retinaRound(scale ?? 1),
-                      size: size.retinaRound(scale ?? 1))
-    }
-
-    init(point: NSPoint) {
-        self.init(x: point.x, y: point.y, width: 0, height: 0)
-    }
-}
-
-extension NSRange {
-    func shifted(by delta: Int) -> NSRange {
-        return NSRange(location: location + delta, length: length)
-    }
-
-    init(from: Int, to: Int) {
-        self.init(location: min(from, to), length: max(from, to) -  min(from, to))
-    }
-}
 
 @objc
 class MultiCursorTextView: NSTextView {
+    static var logger = MultiCursorTextViewLogging()
+    private func DLog(_ messageBlock: @autoclosure () -> String,
+                      file: String = #file,
+                      line: Int = #line,
+                      function: String = #function) {
+        let message = messageBlock()
+        Self.logger.log("\(file):\(line) \(function): \(message)")
+    }
+
     private var optionDrag: Drag? = nil
     private var savedInsertionPointColor: NSColor? = nil
     var caretVisible = true  // true when blinking on, false when blinking off
@@ -121,7 +73,10 @@ class MultiCursorTextView: NSTextView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
     }
+}
 
+// MARK: - Drawing
+extension MultiCursorTextView {
     override func setNeedsDisplay(_ invalidRect: NSRect) {
         super.setNeedsDisplay(invalidRect)
     }
@@ -172,11 +127,6 @@ class MultiCursorTextView: NSTextView {
             self.scheduleBlinkTimer(!visible)
         }
     }
-}
-
-// MARK:- NSView
-
-extension MultiCursorTextView {
 
     override var insertionPointColor: NSColor {
         get {
@@ -215,13 +165,13 @@ extension MultiCursorTextView {
         for rect in multiCursorRects {
             var temp = rect
             temp.size.width = 1
-            print(rect.intersection(dirtyRect))
             temp.fill()
         }
     }
+}
 
-    // MARK:- Mouse
-
+// MARK: - Mouse
+extension MultiCursorTextView {
     override func mouseDown(with event: NSEvent) {
         guard event.modifierFlags.contains(.option) else {
             super.mouseDown(with: event)
@@ -254,7 +204,7 @@ extension MultiCursorTextView {
     }
 }
 
-// MARK:- Utilities
+// MARK: - Utilities
 extension MultiCursorTextView {
     private func enumerateLines<T>(in range: NSRange, closure: (CGRect) throws -> T) rethrows -> [T] {
         guard let layoutManager = layoutManager else {
@@ -312,18 +262,6 @@ extension MultiCursorTextView {
         DLog("Selected ranges is now \(multiCursorSelectedRanges)")
     }
 
-    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
-        if !settingMultiCursorSelectedRanges {
-            DLog("Surprise! Setting ranges not by me to \(ranges).")
-            if ranges.count < 2 {
-                _multiCursorSelectedRanges = nil
-            } else {
-                _multiCursorSelectedRanges = ranges.map { $0.rangeValue }
-            }
-        }
-        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelectingFlag)
-    }
-
     private func split(_ range: NSRange, in containingRect: NSRect) -> [NSRange] {
         DLog("split \(range)")
         let ranges = enumerateLines(in: range) { rect -> NSRange in
@@ -367,23 +305,6 @@ extension MultiCursorTextView {
         return NSOffsetRect(rect, textContainerOrigin.x, textContainerOrigin.y)
     }
 
-}
-
-extension Array where Element: Equatable {
-    var uniq: [Element] {
-        return enumerated().filter { tuple in
-            let (i, value) = tuple
-            if i > 0 && self[i - 1] == value {
-                return false
-            }
-            return true
-        }.map {
-            $0.1
-        }
-    }
-}
-
-extension MultiCursorTextView {
     private func modifyRanges(_ closure: (NSRange) -> (NSRange?)) {
         guard let ranges = _multiCursorSelectedRanges else {
             return
@@ -407,6 +328,420 @@ extension MultiCursorTextView {
         safelySetSelectedRanges(coalesced)
     }
 
+    private func moveLeft(by: NSString.EnumerationOptions) {
+        modifyRanges { glyphRange in
+            var replacementRange: NSRange? = nil
+            let prefixRange = NSRange(from: 0, to: glyphRange.location)
+            let nsstring = textStorage!.string as NSString
+            nsstring.enumerateSubstrings(in: prefixRange,
+                                         options: [by, .reverse]) { maybeString, wordRange, enclosingRange, stop in
+                replacementRange = NSRange(location: wordRange.location, length: 0)
+                stop.pointee = true
+            }
+            return replacementRange
+        }
+    }
+
+    private func moveLeftAndModifySelection(by: NSString.EnumerationOptions) {
+        modifyRanges { glyphRange in
+            var replacementRange: NSRange? = nil
+            let prefixRange = NSRange(from: 0, to: glyphRange.location)
+            let nsstring = textStorage!.string as NSString
+            nsstring.enumerateSubstrings(in: prefixRange,
+                                         options: [by, .reverse]) { maybeString, wordRange, enclosingRange, stop in
+                replacementRange = NSRange(from: wordRange.location, to: glyphRange.upperBound)
+                stop.pointee = true
+            }
+            return replacementRange
+        }
+    }
+
+    private func moveRight(by: NSString.EnumerationOptions) {
+        let numberOfCharacters = textStorage!.string.utf16.count
+        modifyRanges { glyphRange in
+            let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+            var replacementRange: NSRange? = nil
+            let suffixRange = NSRange(from: NSMaxRange(characterRange),
+                                      to: numberOfCharacters)
+            let nsstring = textStorage!.string as NSString
+            nsstring.enumerateSubstrings(in: suffixRange,
+                                         options: by) { maybeString, wordRange, enclosingRange, stop in
+                replacementRange = NSMakeRange(NSMaxRange(wordRange), 0)
+                stop.pointee = true
+            }
+            return replacementRange
+        }
+    }
+
+    private func moveRightAndModifySelection(by: NSString.EnumerationOptions) {
+        let numberOfCharacters = textStorage!.string.utf16.count
+        modifyRanges { glyphRange in
+            let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+            var replacementRange: NSRange? = nil
+            let suffixRange = NSRange(from: NSMaxRange(characterRange),
+                                      to: numberOfCharacters)
+            let nsstring = textStorage!.string as NSString
+            nsstring.enumerateSubstrings(in: suffixRange,
+                                         options: by) { maybeString, wordRange, enclosingRange, stop in
+                replacementRange = NSRange(from: glyphRange.location, to: wordRange.upperBound)
+                stop.pointee = true
+            }
+            return replacementRange
+        }
+    }
+
+    private func underflowingLineFragmentRect(forGlyphAt glyphIndex: Int,
+                                              effectiveRange effectiveGlyphRange: NSRangePointer?) -> NSRect {
+        let location: Int
+        if glyphIndex >= layoutManager!.numberOfGlyphs && layoutManager!.numberOfGlyphs > 0 {
+            location = layoutManager!.numberOfGlyphs - 1
+        } else {
+            location = glyphIndex
+        }
+        return layoutManager!.lineFragmentRect(forGlyphAt: location, effectiveRange: effectiveGlyphRange)
+    }
+
+    private func undoable<T>(_ closure: () throws -> T) rethrows -> T {
+        if let ranges = _multiCursorSelectedRanges {
+            undoManager?.beginUndoGrouping()
+            undoManager?.registerUndo(withTarget: self, handler: { textView in
+                textView.safelySetSelectedRanges(ranges)
+            })
+            defer { undoManager?.endUndoGrouping()}
+            let result = try closure()
+            return result
+        }
+        return try closure()
+    }
+
+    private func paragraphStartIndexes() -> [Int] {
+        let ranges = _multiCursorSelectedRanges ?? selectedRanges.map { $0.rangeValue }
+        return ranges.flatMap {
+            glyphIndexesOfStartOfParagraphsContainingGlyphIndexRange($0)
+        }.sorted().uniq
+    }
+
+    private func glyphIndexesOfStartOfParagraphsContainingGlyphIndexRange(_ range: NSRange) -> [Int] {
+        let nsstring = textStorage!.string as NSString
+        var result = [Int]()
+        nsstring.enumerateSubstrings(in: NSRange(from: 0, to: range.upperBound),
+                                     options: [.byParagraphs, .reverse]) { maybeString, paragraphRange, enclosingRange, stop in
+            result.append(paragraphRange.location)
+            stop.pointee = ObjCBool(paragraphRange.location <= range.location)
+        }
+        return result
+    }
+
+    private func glyphIndexOfStartOfParagraphContainingGlyphIndex(_ index: Int) -> Int {
+        let nsstring = textStorage!.string as NSString
+        var result: Int = index
+        nsstring.enumerateSubstrings(in: NSRange(location: 0, length: min(nsstring.length, index + 1)),
+                                     options: [.byParagraphs, .reverse]) { maybeString, paragraphRange, enclosingRange, stop in
+            result = paragraphRange.location
+            stop.pointee = true
+        }
+        return result
+    }
+
+    private func safelyInsert(_ string: String, at glyphIndex: Int) {
+        let charIndex = layoutManager!.characterIndexForGlyph(at: glyphIndex)
+        settingMultiCursorSelectedRanges = true
+        multiCursorReplaceCharacters(in: NSRange(location: charIndex, length: 0), with: string)
+        settingMultiCursorSelectedRanges = false
+        let length = (string as NSString).length
+        if let ranges = _multiCursorSelectedRanges {
+            let replacementRanges = ranges.map { range -> NSRange in
+                if range.upperBound < charIndex {
+                    // [this range) >insertion point<
+                    return range
+                }
+                if range.lowerBound > charIndex {
+                    // >insertion point< [this range)
+                    return NSRange(location: range.lowerBound + length, length: range.length)
+                }
+                if charIndex == range.location {
+                    // Insert exactly at start of selection.
+                    return NSRange(location: charIndex + length, length: range.length)
+                }
+                precondition(range.lowerBound < charIndex)
+                precondition(range.upperBound >= charIndex)
+                // [this >insertion point< range]
+                return NSRange(location: range.lowerBound, length: range.length + length)
+            }
+            safelySetSelectedRanges(replacementRanges)
+        }
+    }
+
+    // Escaping because enumerateSubstrings wrongly says its block is escaping.
+    private func transformWordInPlace(_ closure: @escaping (String) -> (String)) {
+        guard let ranges = _multiCursorSelectedRanges else {
+            return
+        }
+        undoable {
+            settingMultiCursorSelectedRanges = true
+            let extendedRanges = ranges.map { extendWordLeft(extendWordRight($0)) }
+            let nsstring = textStorage!.string as NSString
+            for range in extendedRanges {
+                nsstring.enumerateSubstrings(in: range,
+                                             options: [.byWords]) { maybeString, wordRange, enclosingRange, stop in
+                    let string = nsstring.substring(with: wordRange)
+                    self.multiCursorReplaceCharacters(in: wordRange, with: closure(string))
+                }
+            }
+            settingMultiCursorSelectedRanges = false
+            safelySetSelectedRanges(extendedRanges)
+        }
+    }
+
+    private func extendLeft(_ range: NSRange, by: NSString.EnumerationOptions) -> NSRange {
+        var result = range
+        let nsstring = textStorage!.string as NSString
+        let rangeToSearch = NSRange(from: 0, to: range.location)
+        nsstring.enumerateSubstrings(
+            in: rangeToSearch,
+            options: [by, .reverse]) { maybeString, wordRange, enclosingRange, stop in
+                result = NSRange(from: wordRange.lowerBound, to: range.upperBound)
+                stop.pointee = true
+            }
+        return result
+    }
+
+    private func extendRight(_ range: NSRange, by: NSString.EnumerationOptions) -> NSRange {
+        let nsstring = textStorage!.string as NSString
+        if range.upperBound == nsstring.length {
+            return range
+        }
+        var result = range
+        let rangeToSearch = NSRange(from: range.upperBound,
+                                    to: nsstring.length)
+        nsstring.enumerateSubstrings(
+            in: rangeToSearch,
+            options: [by]) { maybeString, wordRange, enclosingRange, stop in
+                result = NSRange(from: range.lowerBound, to: wordRange.upperBound)
+                stop.pointee = true
+            }
+        return result
+    }
+
+    private func extendWordLeft(_ range: NSRange) -> NSRange {
+        return extendLeft(range, by: .byWords)
+    }
+
+    private func extendWordRight(_ range: NSRange) -> NSRange {
+        return extendRight(range, by: .byWords)
+    }
+
+    private func extendParagraphLeft(_ range: NSRange) -> NSRange {
+        return extendLeft(range, by: .byParagraphs)
+    }
+
+    private func extendParagraphRight(_ range: NSRange) -> NSRange {
+        return extendRight(range, by: .byParagraphs)
+    }
+
+    private func extendLineLeft(_ range: NSRange) -> NSRange {
+        let rect = underflowingLineFragmentRect(forGlyphAt: max(0, range.location - 1),
+                                                effectiveRange: nil)
+        let index = layoutManager!.glyphIndex(for: rect.origin, in: textContainer!)
+        return NSRange(from: index, to: range.upperBound)
+    }
+
+    private func extendLineRight(_ range: NSRange) -> NSRange {
+        let rect = layoutManager!.lineFragmentRect(forGlyphAt: range.location, effectiveRange: nil)
+        let index = overflowingGlyphIndex(for: rect.maxPointWithinRect, in: textContainer!)
+        return NSRange(from: range.lowerBound, to: index)
+    }
+
+    private func deleteRanges(closure: (Int) -> (Range<Int>)) {
+        guard let ranges = _multiCursorSelectedRanges else {
+            return
+        }
+        settingMultiCursorSelectedRanges = true
+        var newRanges = [NSRange]()
+        var count = 0
+        for unadjustedRange in ranges {
+            let glyphRange: NSRange
+            let adjustedRange = NSRange(location: unadjustedRange.location - count,
+                                        length: unadjustedRange.length)
+            if unadjustedRange.length > 0 {
+                glyphRange = adjustedRange
+            } else {
+                let count = (self.textStorage!.string as NSString).length
+                let proposed = NSRange(closure(adjustedRange.location))
+                guard let safe = proposed.intersection(NSRange(location: 0, length:count)) else {
+                    continue
+                }
+                glyphRange = safe
+            }
+            let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange,
+                                                                    actualGlyphRange: nil)
+            multiCursorReplaceCharacters(in: characterRange, with: "")
+            newRanges.append(NSRange(location: glyphRange.location, length: 0))
+            count += glyphRange.length
+        }
+        settingMultiCursorSelectedRanges = false
+        safelySetSelectedRanges(newRanges)
+    }
+
+    private func mutate<T>(_ closure: () throws -> T) rethrows -> T {
+        let saved = settingMultiCursorSelectedRanges
+        settingMultiCursorSelectedRanges = true
+        let result = try closure()
+        settingMultiCursorSelectedRanges = saved
+        return result
+    }
+
+    private func didModifySubstringLength(originalCharacterRange: NSRange,
+                                          newCharacterRange: NSRange) {
+        precondition(originalCharacterRange.location == newCharacterRange.location)
+
+        guard let originalRanges = _multiCursorSelectedRanges else {
+            return
+        }
+        /*
+         //         |----)   original glyph range that got changed (became longer or shorter)
+         // Possible selection glyph ranges:
+         // 1 |--)
+         // 2 |-------)
+         // 3 |--------------)
+         // 4         |-)
+         // 5         |------)
+         // 6                |---)
+         */
+        let delta = newCharacterRange.length - originalCharacterRange.length
+        let replacementCharRanges = originalRanges.compactMap { selectionGlyphRange -> NSRange? in
+            let selectionCharRange = self.layoutManager!.characterRange(forGlyphRange: selectionGlyphRange, actualGlyphRange: nil)
+            if selectionCharRange.lowerBound <= originalCharacterRange.lowerBound {
+                // Selection starts at or before modified range.
+                if selectionCharRange.upperBound <= originalCharacterRange.lowerBound {
+                    // 1. Selection ends before the modification, so nothing to do here.
+                    return selectionGlyphRange
+                }
+                if selectionCharRange.upperBound <= originalCharacterRange.upperBound {
+                    // 2. Selection's tail was within the modified range. Ensure it doesn't go past
+                    // the new end. This is kinda janky.
+                    return NSRange(from: selectionCharRange.lowerBound,
+                                   to: min(selectionCharRange.upperBound, newCharacterRange.upperBound))
+                }
+                // 3. Selection starts at or before the modified range and ends after it.
+                return NSRange(from: selectionCharRange.lowerBound,
+                               to: selectionCharRange.upperBound + delta)
+            }
+            if selectionCharRange.lowerBound < originalCharacterRange.upperBound {
+                // Selection starts within modified range.
+                if selectionCharRange.upperBound <= originalCharacterRange.upperBound {
+                    // 4. Was entirely contained
+                    let replacementRange = NSRange(from: min(selectionCharRange.location, newCharacterRange.upperBound),
+                                                   to: min(selectionCharRange.upperBound, newCharacterRange.upperBound))
+                    if replacementRange.length == 0 {
+                        // All chars removed
+                        return nil
+                    }
+                    return replacementRange
+                }
+                // 5. Ends after modified range
+                return NSRange(from: min(selectionCharRange.location, newCharacterRange.upperBound),
+                               to: selectionCharRange.upperBound + delta)
+            }
+            // 6. Starts after modified range
+            return selectionCharRange.shifted(by: delta)
+        }
+        let replacementGlyphRanges = replacementCharRanges.map {
+            return layoutManager!.glyphRange(forCharacterRange: $0, actualCharacterRange: nil)
+        }.sorted { lhs, rhs in
+            return lhs.location < rhs.location
+        }.uniq
+        if replacementGlyphRanges == originalRanges {
+            return
+        }
+        safelySetSelectedRanges(replacementGlyphRanges)
+    }
+
+    // Returns the new glyph range.
+    @discardableResult
+    private func modify(glyphRange: NSRange, closure: (String) -> String) -> NSRange {
+        let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let newCharacterRange = modify(characterRange: characterRange, closure: closure)
+        return layoutManager!.glyphRange(forCharacterRange: newCharacterRange, actualCharacterRange: nil)
+    }
+
+    // Returns the new character range
+    @discardableResult
+    private func modify(characterRange: NSRange, closure: (String) -> String) -> NSRange {
+        let nsstring = textStorage!.string as NSString
+        let originalValue = nsstring.substring(with: characterRange)
+        let replacement = closure(originalValue)
+        if replacement == originalValue {
+            return characterRange
+        }
+        return mutate {
+            multiCursorReplaceCharacters(in: characterRange, with: replacement)
+            let newRange = NSMakeRange(characterRange.location, (replacement as NSString).length)
+            didModifySubstringLength(
+                originalCharacterRange: characterRange,
+                newCharacterRange: newRange)
+            return newRange
+        }
+    }
+
+    private func moveSelection(_ index: Int, to range: NSRange) {
+        if index == 0 && _multiCursorSelectedRanges == nil {
+            let glyphRange = layoutManager!.characterRange(forGlyphRange: range, actualGlyphRange: nil)
+            safelySetSelectedRanges([glyphRange])
+            return
+        }
+        var temp = _multiCursorSelectedRanges!
+        temp[index] = range
+        safelySetSelectedRanges(temp)
+    }
+
+    // It is safe to modify existing ranges in the closure, but don't add or delete them.
+    // Since ranges can get coalesced due to adjacency or non-uniqueness, it's hard to use this
+    // correctly. Improve it.
+    private func enumerateRanges(_ closure: (Int, NSRange) -> ()) {
+        for i in 0 ..< (_multiCursorSelectedRanges?.count ?? selectedRanges.count) {
+            guard i < (_multiCursorSelectedRanges?.count ?? selectedRanges.count) else {
+                return
+            }
+            let range: NSRange
+            if let multi = _multiCursorSelectedRanges {
+                range = multi[i]
+            } else {
+                range = selectedRanges[i].rangeValue
+            }
+            closure(i, range)
+        }
+    }
+
+    private func glyphIndexOnLineBelow(glyphIndex: Int) -> Int? {
+        let rect = self.rect(for: NSRange(location: glyphIndex, length: 0))!
+        let i = layoutManager!.glyphIndex(for: rect.neighborBelow.origin, in: textContainer!, fractionOfDistanceThroughGlyph: nil)
+        let sanityCheckRect = layoutManager!.boundingRect(forGlyphRange: NSRange(location: i, length: 1), in: textContainer!)
+        if sanityCheckRect.minY == rect.minY {
+            return nil
+        }
+        return i
+    }
+
+}
+
+// MARK: - NSTextView
+extension MultiCursorTextView {
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
+        if !settingMultiCursorSelectedRanges {
+            DLog("Surprise! Setting ranges not by me to \(ranges).")
+            if ranges.count < 2 {
+                _multiCursorSelectedRanges = nil
+            } else {
+                _multiCursorSelectedRanges = ranges.map { $0.rangeValue }
+            }
+        }
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelectingFlag)
+    }
+}
+
+// MARK: - Movement
+extension MultiCursorTextView {
     override func moveLeft(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveLeft(sender)
@@ -482,68 +817,6 @@ extension MultiCursorTextView {
         }
     }
 
-    private func moveLeft(by: NSString.EnumerationOptions) {
-        modifyRanges { glyphRange in
-            var replacementRange: NSRange? = nil
-            let prefixRange = NSRange(from: 0, to: glyphRange.location)
-            let nsstring = textStorage!.string as NSString
-            nsstring.enumerateSubstrings(in: prefixRange,
-                                         options: [by, .reverse]) { maybeString, wordRange, enclosingRange, stop in
-                replacementRange = NSRange(location: wordRange.location, length: 0)
-                stop.pointee = true
-            }
-            return replacementRange
-        }
-    }
-
-    private func moveLeftAndModifySelection(by: NSString.EnumerationOptions) {
-        modifyRanges { glyphRange in
-            var replacementRange: NSRange? = nil
-            let prefixRange = NSRange(from: 0, to: glyphRange.location)
-            let nsstring = textStorage!.string as NSString
-            nsstring.enumerateSubstrings(in: prefixRange,
-                                         options: [by, .reverse]) { maybeString, wordRange, enclosingRange, stop in
-                replacementRange = NSRange(from: wordRange.location, to: glyphRange.upperBound)
-                stop.pointee = true
-            }
-            return replacementRange
-        }
-    }
-
-    private func moveRight(by: NSString.EnumerationOptions) {
-        let numberOfCharacters = textStorage!.string.utf16.count
-        modifyRanges { glyphRange in
-            let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-            var replacementRange: NSRange? = nil
-            let suffixRange = NSRange(from: NSMaxRange(characterRange),
-                                      to: numberOfCharacters)
-            let nsstring = textStorage!.string as NSString
-            nsstring.enumerateSubstrings(in: suffixRange,
-                                         options: by) { maybeString, wordRange, enclosingRange, stop in
-                replacementRange = NSMakeRange(NSMaxRange(wordRange), 0)
-                stop.pointee = true
-            }
-            return replacementRange
-        }
-    }
-
-    private func moveRightAndModifySelection(by: NSString.EnumerationOptions) {
-        let numberOfCharacters = textStorage!.string.utf16.count
-        modifyRanges { glyphRange in
-            let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-            var replacementRange: NSRange? = nil
-            let suffixRange = NSRange(from: NSMaxRange(characterRange),
-                                      to: numberOfCharacters)
-            let nsstring = textStorage!.string as NSString
-            nsstring.enumerateSubstrings(in: suffixRange,
-                                         options: by) { maybeString, wordRange, enclosingRange, stop in
-                replacementRange = NSRange(from: glyphRange.location, to: wordRange.upperBound)
-                stop.pointee = true
-            }
-            return replacementRange
-        }
-    }
-
     override func moveWordRight(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveWordForward(sender)
@@ -584,17 +857,6 @@ extension MultiCursorTextView {
         moveRight(by: .byParagraphs)
     }
 
-    private func underflowingLineFragmentRect(forGlyphAt glyphIndex: Int,
-                                              effectiveRange effectiveGlyphRange: NSRangePointer?) -> NSRect {
-        let location: Int
-        if glyphIndex >= layoutManager!.numberOfGlyphs && layoutManager!.numberOfGlyphs > 0 {
-            location = layoutManager!.numberOfGlyphs - 1
-        } else {
-            location = glyphIndex
-        }
-        return layoutManager!.lineFragmentRect(forGlyphAt: location, effectiveRange: effectiveGlyphRange)
-    }
-
     override func moveToBeginningOfLine(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToBeginningOfLine(sender)
@@ -613,71 +875,6 @@ extension MultiCursorTextView {
         modifyRanges { glyphRange in
             return NSRange(location: extendLineRight(glyphRange).upperBound, length: 0)
         }
-    }
-
-    func multiCursorReplaceCharacters(in range: NSRange, with replacement: String) {
-        if shouldChangeText(in: range, replacementString: replacement) {
-            textStorage?.beginEditing()
-            textStorage?.replaceCharacters(in: range, with: replacement)
-            textStorage?.endEditing()
-            didChangeText()
-        }
-    }
-
-    override func insertText(_ insertString: Any) {
-        guard let ranges = _multiCursorSelectedRanges else {
-            super.insertText(insertString, replacementRange: selectedRange())
-            return
-        }
-
-        let stringLength: Int
-        if let string = insertString as? String {
-            stringLength = string.utf16.count
-        } else if let string = insertString as? NSAttributedString {
-            stringLength = string.string.utf16.count
-        } else {
-            fatalError()
-        }
-
-        var selectionCharacterRanges: [NSRange] = []
-        let preCharacterRanges = ranges.map {
-            layoutManager!.characterRange(forGlyphRange: $0, actualGlyphRange: nil)
-        }
-
-        undoable {
-            settingMultiCursorSelectedRanges = true
-            var delta = 0
-            for preCharacterRange in preCharacterRanges {
-                var characterRange = preCharacterRange
-                characterRange.location -= delta
-                delta += characterRange.length - stringLength
-
-                if let string = insertString as? String {
-                    multiCursorReplaceCharacters(in: characterRange, with: string)
-                } else if let string = insertString as? NSAttributedString {
-                    multiCursorReplaceCharacters(in: characterRange, with: string.string)
-                }
-
-                selectionCharacterRanges.append(NSMakeRange(characterRange.location + stringLength, 0))
-            }
-            settingMultiCursorSelectedRanges = false
-            safelySetSelectedRanges(selectionCharacterRanges.map {
-                layoutManager!.glyphRange(forCharacterRange: $0, actualCharacterRange: nil)
-            })
-        }
-    }
-
-    private func undoable<T>(_ closure: () throws -> T) rethrows -> T {
-        if let ranges = _multiCursorSelectedRanges {
-            undoManager?.beginUndoGrouping()
-            undoManager?.registerUndo(withTarget: self, handler: { textView in
-                textView.safelySetSelectedRanges(ranges)
-            })
-            defer { undoManager?.endUndoGrouping()}
-            let result = try closure()
-            return result
-        }
-        return try closure()
     }
 
     override func moveLeftAndModifySelection(_ sender: Any?) {
@@ -932,7 +1129,107 @@ extension MultiCursorTextView {
         }
         moveToEndOfLineAndModifySelection(sender)
     }
+}
 
+// MARK: - Insertion
+extension MultiCursorTextView {
+    override func insertText(_ insertString: Any) {
+        guard let ranges = _multiCursorSelectedRanges else {
+            super.insertText(insertString, replacementRange: selectedRange())
+            return
+        }
+
+        let stringLength: Int
+        if let string = insertString as? String {
+            stringLength = string.utf16.count
+        } else if let string = insertString as? NSAttributedString {
+            stringLength = string.string.utf16.count
+        } else {
+            fatalError()
+        }
+
+        var selectionCharacterRanges: [NSRange] = []
+        let preCharacterRanges = ranges.map {
+            layoutManager!.characterRange(forGlyphRange: $0, actualGlyphRange: nil)
+        }
+
+        undoable {
+            settingMultiCursorSelectedRanges = true
+            var delta = 0
+            for preCharacterRange in preCharacterRanges {
+                var characterRange = preCharacterRange
+                characterRange.location -= delta
+                delta += characterRange.length - stringLength
+
+                if let string = insertString as? String {
+                    multiCursorReplaceCharacters(in: characterRange, with: string)
+                } else if let string = insertString as? NSAttributedString {
+                    multiCursorReplaceCharacters(in: characterRange, with: string.string)
+                }
+
+                selectionCharacterRanges.append(NSMakeRange(characterRange.location + stringLength, 0))
+            }
+            settingMultiCursorSelectedRanges = false
+            safelySetSelectedRanges(selectionCharacterRanges.map {
+                layoutManager!.glyphRange(forCharacterRange: $0, actualCharacterRange: nil)
+            })
+        }
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        if _multiCursorSelectedRanges == nil {
+            super.insertNewline(sender)
+        } else {
+            insertText("\n")
+        }
+    }
+
+    override func insertParagraphSeparator(_ sender: Any?) {
+        if _multiCursorSelectedRanges == nil {
+            super.insertParagraphSeparator(sender)
+        } else {
+            // The documentation is garbage. I can't get it to behave differently than insertNewline.
+            insertText("\n")
+        }
+    }
+
+    override func insertLineBreak(_ sender: Any?) {
+        if _multiCursorSelectedRanges == nil {
+            super.insertLineBreak(sender)
+        } else {
+            insertText("\n")
+        }
+    }
+
+    override func insertContainerBreak(_ sender: Any?) {
+        if _multiCursorSelectedRanges == nil {
+            super.insertContainerBreak(sender)
+        } else {
+            insertNewline(sender)
+        }
+    }
+
+    override func insertSingleQuoteIgnoringSubstitution(_ sender: Any?) {
+        if _multiCursorSelectedRanges == nil {
+            super.insertSingleQuoteIgnoringSubstitution(sender)
+        } else {
+            // I don't support substitution
+            insertText("'")
+        }
+    }
+
+    override func insertDoubleQuoteIgnoringSubstitution(_ sender: Any?) {
+        if _multiCursorSelectedRanges == nil {
+            super.insertDoubleQuoteIgnoringSubstitution(sender)
+        } else {
+            // I don't support substitution
+            insertText("\"")
+        }
+    }
+}
+
+// MARK: - Tranposition
+extension MultiCursorTextView {
     override func transpose(_ sender: Any?) {
         guard let ranges = _multiCursorSelectedRanges else {
             super.transpose(sender)
@@ -961,13 +1258,11 @@ extension MultiCursorTextView {
 
     // I can't get the built-in transposeWords: to work at all so I haven't written a replacement
     // for it as it is untestable (macOS 12.2.1)
+}
 
-    private func paragraphStartIndexes() -> [Int] {
-        let ranges = _multiCursorSelectedRanges ?? selectedRanges.map { $0.rangeValue }
-        return ranges.flatMap {
-            glyphIndexesOfStartOfParagraphsContainingGlyphIndexRange($0)
-        }.sorted().uniq
-    }
+// MARK: - Indentation
+extension MultiCursorTextView {
+    // I don't implement insertTabIgnoringFieldEditor: because I think it's irrelevant for NSTextView.
 
     override func indent(_ sender: Any?) {
         let ranges = _multiCursorSelectedRanges ?? selectedRanges.map { $0.rangeValue }
@@ -980,57 +1275,6 @@ extension MultiCursorTextView {
             for index in locations.reversed() {
                 safelyInsert(String(repeating: " ", count: tabStop), at: index)
             }
-        }
-    }
-
-    private func glyphIndexesOfStartOfParagraphsContainingGlyphIndexRange(_ range: NSRange) -> [Int] {
-        let nsstring = textStorage!.string as NSString
-        var result = [Int]()
-        nsstring.enumerateSubstrings(in: NSRange(from: 0, to: range.upperBound),
-                                     options: [.byParagraphs, .reverse]) { maybeString, paragraphRange, enclosingRange, stop in
-            result.append(paragraphRange.location)
-            stop.pointee = ObjCBool(paragraphRange.location <= range.location)
-        }
-        return result
-    }
-
-    private func glyphIndexOfStartOfParagraphContainingGlyphIndex(_ index: Int) -> Int {
-        let nsstring = textStorage!.string as NSString
-        var result: Int = index
-        nsstring.enumerateSubstrings(in: NSRange(location: 0, length: min(nsstring.length, index + 1)),
-                                     options: [.byParagraphs, .reverse]) { maybeString, paragraphRange, enclosingRange, stop in
-            result = paragraphRange.location
-            stop.pointee = true
-        }
-        return result
-    }
-
-    private func safelyInsert(_ string: String, at glyphIndex: Int) {
-        let charIndex = layoutManager!.characterIndexForGlyph(at: glyphIndex)
-        settingMultiCursorSelectedRanges = true
-        multiCursorReplaceCharacters(in: NSRange(location: charIndex, length: 0), with: string)
-        settingMultiCursorSelectedRanges = false
-        let length = (string as NSString).length
-        if let ranges = _multiCursorSelectedRanges {
-            let replacementRanges = ranges.map { range -> NSRange in
-                if range.upperBound < charIndex {
-                    // [this range) >insertion point<
-                    return range
-                }
-                if range.lowerBound > charIndex {
-                    // >insertion point< [this range)
-                    return NSRange(location: range.lowerBound + length, length: range.length)
-                }
-                if charIndex == range.location {
-                    // Insert exactly at start of selection.
-                    return NSRange(location: charIndex + length, length: range.length)
-                }
-                precondition(range.lowerBound < charIndex)
-                precondition(range.upperBound >= charIndex)
-                // [this >insertion point< range]
-                return NSRange(location: range.lowerBound, length: range.length + length)
-            }
-            safelySetSelectedRanges(replacementRanges)
         }
     }
 
@@ -1100,31 +1344,6 @@ extension MultiCursorTextView {
         insertText(String(repeating: " ", count: tabStop))
     }
 
-    override func insertNewline(_ sender: Any?) {
-        if _multiCursorSelectedRanges == nil {
-            super.insertNewline(sender)
-        } else {
-            insertText("\n")
-        }
-    }
-
-    override func insertParagraphSeparator(_ sender: Any?) {
-        if _multiCursorSelectedRanges == nil {
-            super.insertParagraphSeparator(sender)
-        } else {
-            // The documentation is garbage. I can't get it to behave differently than insertNewline.
-            insertText("\n")
-        }
-    }
-
-    override func insertLineBreak(_ sender: Any?) {
-        if _multiCursorSelectedRanges == nil {
-            super.insertLineBreak(sender)
-        } else {
-            insertText("\n")
-        }
-    }
-
     override func insertTabIgnoringFieldEditor(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertTabIgnoringFieldEditor(sender)
@@ -1132,54 +1351,11 @@ extension MultiCursorTextView {
             insertTab(sender)
         }
     }
+}
 
-    override func insertContainerBreak(_ sender: Any?) {
-        if _multiCursorSelectedRanges == nil {
-            super.insertContainerBreak(sender)
-        } else {
-            insertNewline(sender)
-        }
-    }
-
-    override func insertSingleQuoteIgnoringSubstitution(_ sender: Any?) {
-        if _multiCursorSelectedRanges == nil {
-            super.insertSingleQuoteIgnoringSubstitution(sender)
-        } else {
-            // I don't support substitution
-            insertText("'")
-        }
-    }
-
-    override func insertDoubleQuoteIgnoringSubstitution(_ sender: Any?) {
-        if _multiCursorSelectedRanges == nil {
-            super.insertDoubleQuoteIgnoringSubstitution(sender)
-        } else {
-            // I don't support substitution
-            insertText("\"")
-        }
-    }
-
-    // Escaping because enumerateSubstrings wrongly says its block is escaping.
-    private func transformWordInPlace(_ closure: @escaping (String) -> (String)) {
-        guard let ranges = _multiCursorSelectedRanges else {
-            return
-        }
-        undoable {
-            settingMultiCursorSelectedRanges = true
-            let extendedRanges = ranges.map { extendWordLeft(extendWordRight($0)) }
-            let nsstring = textStorage!.string as NSString
-            for range in extendedRanges {
-                nsstring.enumerateSubstrings(in: range,
-                                             options: [.byWords]) { maybeString, wordRange, enclosingRange, stop in
-                    let string = nsstring.substring(with: wordRange)
-                    self.multiCursorReplaceCharacters(in: wordRange, with: closure(string))
-                }
-            }
-            settingMultiCursorSelectedRanges = false
-            safelySetSelectedRanges(extendedRanges)
-        }
-    }
-
+// MARK: - Case Transformation
+extension MultiCursorTextView {
+    // I don't implement changeCaseOfLetter: because NSTextView does not support it
     override func uppercaseWord(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.uppercaseWord(sender)
@@ -1196,65 +1372,6 @@ extension MultiCursorTextView {
         transformWordInPlace { $0.lowercased() }
     }
 
-    private func extendLeft(_ range: NSRange, by: NSString.EnumerationOptions) -> NSRange {
-        var result = range
-        let nsstring = textStorage!.string as NSString
-        let rangeToSearch = NSRange(from: 0, to: range.location)
-        nsstring.enumerateSubstrings(
-            in: rangeToSearch,
-            options: [by, .reverse]) { maybeString, wordRange, enclosingRange, stop in
-                result = NSRange(from: wordRange.lowerBound, to: range.upperBound)
-                stop.pointee = true
-            }
-        return result
-    }
-
-    private func extendRight(_ range: NSRange, by: NSString.EnumerationOptions) -> NSRange {
-        let nsstring = textStorage!.string as NSString
-        if range.upperBound == nsstring.length {
-            return range
-        }
-        var result = range
-        let rangeToSearch = NSRange(from: range.upperBound,
-                                    to: nsstring.length)
-        nsstring.enumerateSubstrings(
-            in: rangeToSearch,
-            options: [by]) { maybeString, wordRange, enclosingRange, stop in
-                result = NSRange(from: range.lowerBound, to: wordRange.upperBound)
-                stop.pointee = true
-            }
-        return result
-    }
-
-    private func extendWordLeft(_ range: NSRange) -> NSRange {
-        return extendLeft(range, by: .byWords)
-    }
-
-    private func extendWordRight(_ range: NSRange) -> NSRange {
-        return extendRight(range, by: .byWords)
-    }
-
-    private func extendParagraphLeft(_ range: NSRange) -> NSRange {
-        return extendLeft(range, by: .byParagraphs)
-    }
-
-    private func extendParagraphRight(_ range: NSRange) -> NSRange {
-        return extendRight(range, by: .byParagraphs)
-    }
-
-    private func extendLineLeft(_ range: NSRange) -> NSRange {
-        let rect = underflowingLineFragmentRect(forGlyphAt: max(0, range.location - 1),
-                                                effectiveRange: nil)
-        let index = layoutManager!.glyphIndex(for: rect.origin, in: textContainer!)
-        return NSRange(from: index, to: range.upperBound)
-    }
-
-    private func extendLineRight(_ range: NSRange) -> NSRange {
-        let rect = layoutManager!.lineFragmentRect(forGlyphAt: range.location, effectiveRange: nil)
-        let index = overflowingGlyphIndex(for: rect.maxPointWithinRect, in: textContainer!)
-        return NSRange(from: range.lowerBound, to: index)
-    }
-
     override func capitalizeWord(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.capitalizeWord(sender)
@@ -1262,38 +1379,10 @@ extension MultiCursorTextView {
         }
         transformWordInPlace { $0.firstCapitalized }
     }
+}
 
-    private func deleteRanges(closure: (Int) -> (Range<Int>)) {
-        guard let ranges = _multiCursorSelectedRanges else {
-            return
-        }
-        settingMultiCursorSelectedRanges = true
-        var newRanges = [NSRange]()
-        var count = 0
-        for unadjustedRange in ranges {
-            let glyphRange: NSRange
-            let adjustedRange = NSRange(location: unadjustedRange.location - count,
-                                        length: unadjustedRange.length)
-            if unadjustedRange.length > 0 {
-                glyphRange = adjustedRange
-            } else {
-                let count = (self.textStorage!.string as NSString).length
-                let proposed = NSRange(closure(adjustedRange.location))
-                guard let safe = proposed.intersection(NSRange(location: 0, length:count)) else {
-                    continue
-                }
-                glyphRange = safe
-            }
-            let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange,
-                                                                    actualGlyphRange: nil)
-            multiCursorReplaceCharacters(in: characterRange, with: "")
-            newRanges.append(NSRange(location: glyphRange.location, length: 0))
-            count += glyphRange.length
-        }
-        settingMultiCursorSelectedRanges = false
-        safelySetSelectedRanges(newRanges)
-    }
-
+// MARK: - Deletion
+extension MultiCursorTextView {
     override func deleteForward(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteForward(sender)
@@ -1315,107 +1404,6 @@ extension MultiCursorTextView {
             deleteRanges() { index in
                 return (index - 1) ..< index
             }
-        }
-    }
-
-    private func mutate<T>(_ closure: () throws -> T) rethrows -> T {
-        let saved = settingMultiCursorSelectedRanges
-        settingMultiCursorSelectedRanges = true
-        let result = try closure()
-        settingMultiCursorSelectedRanges = saved
-        return result
-    }
-
-    private func didModifySubstringLength(originalCharacterRange: NSRange,
-                                          newCharacterRange: NSRange) {
-        precondition(originalCharacterRange.location == newCharacterRange.location)
-
-        guard let originalRanges = _multiCursorSelectedRanges else {
-            return
-        }
-        /*
-         //         |----)   original glyph range that got changed (became longer or shorter)
-         // Possible selection glyph ranges:
-         // 1 |--)
-         // 2 |-------)
-         // 3 |--------------)
-         // 4         |-)
-         // 5         |------)
-         // 6                |---)
-         */
-        let delta = newCharacterRange.length - originalCharacterRange.length
-        let replacementCharRanges = originalRanges.compactMap { selectionGlyphRange -> NSRange? in
-            let selectionCharRange = self.layoutManager!.characterRange(forGlyphRange: selectionGlyphRange, actualGlyphRange: nil)
-            if selectionCharRange.lowerBound <= originalCharacterRange.lowerBound {
-                // Selection starts at or before modified range.
-                if selectionCharRange.upperBound <= originalCharacterRange.lowerBound {
-                    // 1. Selection ends before the modification, so nothing to do here.
-                    return selectionGlyphRange
-                }
-                if selectionCharRange.upperBound <= originalCharacterRange.upperBound {
-                    // 2. Selection's tail was within the modified range. Ensure it doesn't go past
-                    // the new end. This is kinda janky.
-                    return NSRange(from: selectionCharRange.lowerBound,
-                                   to: min(selectionCharRange.upperBound, newCharacterRange.upperBound))
-                }
-                // 3. Selection starts at or before the modified range and ends after it.
-                return NSRange(from: selectionCharRange.lowerBound,
-                               to: selectionCharRange.upperBound + delta)
-            }
-            if selectionCharRange.lowerBound < originalCharacterRange.upperBound {
-                // Selection starts within modified range.
-                if selectionCharRange.upperBound <= originalCharacterRange.upperBound {
-                    // 4. Was entirely contained
-                    let replacementRange = NSRange(from: min(selectionCharRange.location, newCharacterRange.upperBound),
-                                                   to: min(selectionCharRange.upperBound, newCharacterRange.upperBound))
-                    if replacementRange.length == 0 {
-                        // All chars removed
-                        return nil
-                    }
-                    return replacementRange
-                }
-                // 5. Ends after modified range
-                return NSRange(from: min(selectionCharRange.location, newCharacterRange.upperBound),
-                               to: selectionCharRange.upperBound + delta)
-            }
-            // 6. Starts after modified range
-            return selectionCharRange.shifted(by: delta)
-        }
-        let replacementGlyphRanges = replacementCharRanges.map {
-            return layoutManager!.glyphRange(forCharacterRange: $0, actualCharacterRange: nil)
-        }.sorted { lhs, rhs in
-            return lhs.location < rhs.location
-        }.uniq
-        if replacementGlyphRanges == originalRanges {
-            return
-        }
-        safelySetSelectedRanges(replacementGlyphRanges)
-    }
-
-    // Returns the new glyph range.
-    @discardableResult
-    private func modify(glyphRange: NSRange, closure: (String) -> String) -> NSRange {
-        let characterRange = self.layoutManager!.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-        let newCharacterRange = modify(characterRange: characterRange, closure: closure)
-        return layoutManager!.glyphRange(forCharacterRange: newCharacterRange, actualCharacterRange: nil)
-    }
-
-    // Returns the new character range
-    @discardableResult
-    private func modify(characterRange: NSRange, closure: (String) -> String) -> NSRange {
-        let nsstring = textStorage!.string as NSString
-        let originalValue = nsstring.substring(with: characterRange)
-        let replacement = closure(originalValue)
-        if replacement == originalValue {
-            return characterRange
-        }
-        return mutate {
-            multiCursorReplaceCharacters(in: characterRange, with: replacement)
-            let newRange = NSMakeRange(characterRange.location, (replacement as NSString).length)
-            didModifySubstringLength(
-                originalCharacterRange: characterRange,
-                newCharacterRange: newRange)
-            return newRange
         }
     }
 
@@ -1513,18 +1501,10 @@ extension MultiCursorTextView {
             }
         }
     }
+}
 
-    private func moveSelection(_ index: Int, to range: NSRange) {
-        if index == 0 && _multiCursorSelectedRanges == nil {
-            let glyphRange = layoutManager!.characterRange(forGlyphRange: range, actualGlyphRange: nil)
-            safelySetSelectedRanges([glyphRange])
-            return
-        }
-        var temp = _multiCursorSelectedRanges!
-        temp[index] = range
-        safelySetSelectedRanges(temp)
-    }
-
+// MARK: - Copy/Paste
+extension MultiCursorTextView {
     override func paste(_ sender: Any?) {
         let board = NSPasteboard.general
         guard board.availableType(from: [.multipleTextSelection]) == .multipleTextSelection,
@@ -1592,33 +1572,6 @@ extension MultiCursorTextView {
         }
     }
 
-    // It is safe to modify existing ranges in the closure, but don't add or delete them.
-    // Since ranges can get coalesced due to adjacency or non-uniqueness, it's hard to use this
-    // correctly. Improve it.
-    private func enumerateRanges(_ closure: (Int, NSRange) -> ()) {
-        for i in 0 ..< (_multiCursorSelectedRanges?.count ?? selectedRanges.count) {
-            guard i < (_multiCursorSelectedRanges?.count ?? selectedRanges.count) else {
-                return
-            }
-            let range: NSRange
-            if let multi = _multiCursorSelectedRanges {
-                range = multi[i]
-            } else {
-                range = selectedRanges[i].rangeValue
-            }
-            closure(i, range)
-        }
-    }
-    private func glyphIndexOnLineBelow(glyphIndex: Int) -> Int? {
-        let rect = self.rect(for: NSRange(location: glyphIndex, length: 0))!
-        let i = layoutManager!.glyphIndex(for: rect.neighborBelow.origin, in: textContainer!, fractionOfDistanceThroughGlyph: nil)
-        let sanityCheckRect = layoutManager!.boundingRect(forGlyphRange: NSRange(location: i, length: 1), in: textContainer!)
-        if sanityCheckRect.minY == rect.minY {
-            return nil
-        }
-        return i
-    }
-
     internal override func copy(_ sender: Any?) {
         guard let ranges = _multiCursorSelectedRanges else {
             super.copy(sender)
@@ -1640,7 +1593,10 @@ extension MultiCursorTextView {
         let string = values.joined(separator: "\n") as NSPasteboardWriting
         pboard.writeObjects([string])
     }
+}
 
+// MARK: - Other NSResponder
+extension MultiCursorTextView {
     override func cancelOperation(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.cancelOperation(sender)
@@ -1648,20 +1604,35 @@ extension MultiCursorTextView {
         }
         safelySetSelectedRanges([_multiCursorSelectedRanges!.last!])
     }
+}
 
-    // I don't implement insertTabIgnoringFieldEditor: because I think it's irrelevant for NSTextView.
-    // I don't implement changeCaseOfLetter: because NSTextView does not support it
+// MARK: - New APIs
+extension MultiCursorTextView {
+    public func multiCursorReplaceCharacters(in range: NSRange, with replacement: String) {
+        if shouldChangeText(in: range, replacementString: replacement) {
+            textStorage?.beginEditing()
+            textStorage?.replaceCharacters(in: range, with: replacement)
+            textStorage?.endEditing()
+            didChangeText()
+        }
+    }
 }
 
 extension StringProtocol {
     var firstCapitalized: String { prefix(1).capitalized + dropFirst() }
 }
-/*
- a
- b
- c
- d
- e
- f
- g
- */
+
+extension Array where Element: Equatable {
+    var uniq: [Element] {
+        return enumerated().filter { tuple in
+            let (i, value) = tuple
+            if i > 0 && self[i - 1] == value {
+                return false
+            }
+            return true
+        }.map {
+            $0.1
+        }
+    }
+}
+

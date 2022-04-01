@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A635CD1A27F6D7A200434664 /* NSPoint+MultiCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A635CD1927F6D7A200434664 /* NSPoint+MultiCursor.swift */; };
+		A635CD1C27F6D7B400434664 /* NSSIze+MultiCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A635CD1B27F6D7B400434664 /* NSSIze+MultiCursor.swift */; };
+		A635CD1E27F6D7C200434664 /* NSRect+MultiCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A635CD1D27F6D7C200434664 /* NSRect+MultiCursor.swift */; };
+		A635CD2027F6D7D200434664 /* NSRange+MultiCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A635CD1F27F6D7D200434664 /* NSRange+MultiCursor.swift */; };
+		A635CD2227F6D7E100434664 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = A635CD2127F6D7E100434664 /* Logging.swift */; };
 		A678FEB327F4D0D600BEF8FA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A678FEB227F4D0D600BEF8FA /* AppDelegate.swift */; };
 		A678FEB527F4D0D600BEF8FA /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A678FEB427F4D0D600BEF8FA /* ViewController.swift */; };
 		A678FEB727F4D0D700BEF8FA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A678FEB627F4D0D700BEF8FA /* Assets.xcassets */; };
@@ -15,6 +20,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A635CD1927F6D7A200434664 /* NSPoint+MultiCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSPoint+MultiCursor.swift"; sourceTree = "<group>"; };
+		A635CD1B27F6D7B400434664 /* NSSIze+MultiCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSSIze+MultiCursor.swift"; sourceTree = "<group>"; };
+		A635CD1D27F6D7C200434664 /* NSRect+MultiCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSRect+MultiCursor.swift"; sourceTree = "<group>"; };
+		A635CD1F27F6D7D200434664 /* NSRange+MultiCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSRange+MultiCursor.swift"; sourceTree = "<group>"; };
+		A635CD2127F6D7E100434664 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		A678FEAF27F4D0D600BEF8FA /* MultiCursor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MultiCursor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A678FEB227F4D0D600BEF8FA /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A678FEB427F4D0D600BEF8FA /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
@@ -55,11 +65,16 @@
 			isa = PBXGroup;
 			children = (
 				A678FEB227F4D0D600BEF8FA /* AppDelegate.swift */,
-				A678FEB427F4D0D600BEF8FA /* ViewController.swift */,
 				A678FEB627F4D0D700BEF8FA /* Assets.xcassets */,
+				A635CD2127F6D7E100434664 /* Logging.swift */,
 				A678FEB827F4D0D700BEF8FA /* Main.storyboard */,
 				A678FEBB27F4D0D700BEF8FA /* MultiCursor.entitlements */,
 				A678FEC127F4D0ED00BEF8FA /* MultiCursorTextView.swift */,
+				A635CD1927F6D7A200434664 /* NSPoint+MultiCursor.swift */,
+				A635CD1F27F6D7D200434664 /* NSRange+MultiCursor.swift */,
+				A635CD1D27F6D7C200434664 /* NSRect+MultiCursor.swift */,
+				A635CD1B27F6D7B400434664 /* NSSIze+MultiCursor.swift */,
+				A678FEB427F4D0D600BEF8FA /* ViewController.swift */,
 			);
 			path = MultiCursor;
 			sourceTree = "<group>";
@@ -134,9 +149,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A635CD1E27F6D7C200434664 /* NSRect+MultiCursor.swift in Sources */,
+				A635CD1C27F6D7B400434664 /* NSSIze+MultiCursor.swift in Sources */,
+				A635CD2027F6D7D200434664 /* NSRange+MultiCursor.swift in Sources */,
 				A678FEB527F4D0D600BEF8FA /* ViewController.swift in Sources */,
 				A678FEC227F4D0ED00BEF8FA /* MultiCursorTextView.swift in Sources */,
 				A678FEB327F4D0D600BEF8FA /* AppDelegate.swift in Sources */,
+				A635CD1A27F6D7A200434664 /* NSPoint+MultiCursor.swift in Sources */,
+				A635CD2227F6D7E100434664 /* Logging.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
