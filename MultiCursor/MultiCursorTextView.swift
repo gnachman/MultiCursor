@@ -36,7 +36,22 @@ class MultiCursorTextView: NSTextView {
         Self.logger.log("\(file):\(line) \(function): \(message)")
     }
 
-    private var optionDrag: Drag? = nil
+    private enum DragType {
+        case option(Drag)
+        // Index of cursor to modify
+        case controlShift(index: Int, kind: NSString.EnumerationOptions)
+
+        mutating func convert(to kind: NSString.EnumerationOptions) {
+            switch self {
+            case .option(_):
+                return
+            case .controlShift(let index, _):
+                self = .controlShift(index: index, kind: kind)
+            }
+        }
+    }
+
+    private var optionDrag: DragType? = nil
     private var savedInsertionPointColor: NSColor? = nil
     var caretVisible = true  // true when blinking on, false when blinking off
     private var timer: Timer? = nil
@@ -175,54 +190,105 @@ extension MultiCursorTextView {
 // MARK: - Mouse
 extension MultiCursorTextView {
     private func isControlShiftClick(_ event: NSEvent) -> Bool {
-        return event.modifierFlags.intersection([.command, .option, .shift, .control]) == [.control, .shift]
+        return event.buttonNumber == 0 && event.onlyControlAndShiftPressed
     }
+
+    private func handleControlShiftClick(_ event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if event.clickCount == 1 {
+            if let index = addCursor(at: point) {
+                optionDrag = .controlShift(index: index, kind: .byCaretPositions)
+            }
+        } else if event.clickCount == 2 {
+            convertCursor(at: point, to: .byWords)
+            optionDrag?.convert(to: .byWords)
+        } else if event.clickCount == 3 {
+            convertCursor(at: point, to: .byParagraphs)
+            optionDrag?.convert(to: .byParagraphs)
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 1 && isControlShiftClick(event) {
-            addCursor(at: convert(event.locationInWindow, from: nil))
+        NSLog("mouseDown \(event)")
+        if event.clickCount == 1 {
+            optionDrag = nil
+        }
+        if isControlShiftClick(event) {
+            handleControlShiftClick(event)
             return
         }
+
         guard event.modifierFlags.contains(.option) else {
             super.mouseDown(with: event)
             return
         }
 
         let point = convert(event.locationInWindow, from: nil)
-        optionDrag = Drag(point)
-        updateSelectedRanges(optionDrag!)
+        let drag = Drag(point)
+        optionDrag = .option(drag)
+        updateSelectedRanges(drag)
     }
 
     @objc(rightMouseDown:)
     override func rightMouseDown(with event: NSEvent) {
+        if event.clickCount == 1 {
+            optionDrag = nil
+        }
         if event.clickCount == 1 && isControlShiftClick(event) {
-            addCursor(at: convert(event.locationInWindow, from: nil))
+            handleControlShiftClick(event)
             return
         }
         super.rightMouseDown(with: event)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        if event.clickCount == 1 && isControlShiftClick(event) {
+        if isControlShiftClick(event) {
             return nil
         }
         return super.menu(for: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if optionDrag != nil {
+        switch optionDrag {
+        case .none:
+            break
+        case .option(var drag):
             let point = convert(event.locationInWindow, from: nil)
             DLog("Drag to \(point)")
-            optionDrag?.end = point
-            updateSelectedRanges(optionDrag!)
+            drag.end = point
+            updateSelectedRanges(drag)
+            optionDrag = .option(drag)
+            return
+        case .controlShift(let index, let kind):
+            // TODO
+            guard let ranges = _multiCursorSelectedRanges, ranges.count > index else {
+                break
+            }
+            let range = ranges[index]
+            let point = convert(event.locationInWindow, from: nil)
+            guard var glyphIndex = self.glyphRange(atPoint: point)?.location else {
+                break
+            }
+            if kind == .byCaretPositions {
+                // No change
+            } else if kind == .byWords {
+                glyphIndex = extendWordRight(NSRange(location: glyphIndex, length: 0)).upperBound
+            } else if kind == .byParagraphs {
+                glyphIndex = extendParagraphRight(NSRange(location: glyphIndex, length: 0)).upperBound
+            }
+            let replacementRange = NSRange(from: range.location, to: glyphIndex)
+            var replacementRanges = ranges
+            replacementRanges[index] = replacementRange
+            safelySetSelectedRanges(replacementRanges)
             return
         }
         super.mouseDragged(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
+        NSLog("mouse up \(event)")
         if optionDrag != nil {
-            DLog("Finish drag at \(String(describing: optionDrag?.end))")
-            optionDrag = nil
+            DLog("Finish drag at \(String(describing: optionDrag!))")
             return
         }
         super.mouseUp(with: event)
@@ -270,20 +336,73 @@ extension MultiCursorTextView {
         safelySetSelectedRanges(ranges)
     }
 
-    private func addCursor(at point: NSPoint) {
+    private func glyphRange(atPoint point: NSPoint) -> NSRange? {
         let rect = NSRect(origin: point,
                           size: NSSize(width: 1, height: 1))
         let range = layoutManager!.glyphRange(forBoundingRect: rect,
                                               in: textContainer!)
         if range.location == NSNotFound {
-            return
+            return nil
         }
         let ranges = split(range, in: rect)
-        let temp = (_multiCursorSelectedRanges ?? [selectedRange()]) + [ranges[0]]
+        if ranges.count == 0 {
+            return nil
+        }
+        return ranges[0]
+    }
+
+    private func addCursor(at point: NSPoint) -> Int? {
+        DLog("Add cursor at \(point)")
+        guard let newRange = glyphRange(atPoint: point) else {
+            DLog("  no range for point")
+            return nil
+        }
+        DLog("  range is \(newRange)")
+        let temp = (_multiCursorSelectedRanges ?? [selectedRange()]) + [newRange]
         let sorted = temp.sorted { lhs, rhs in
             return lhs.location < rhs.location
         }.uniq
+        DLog("  new curesors: \(sorted)")
         safelySetSelectedRanges(sorted)
+        return sorted.firstIndex { candidate in
+            return candidate == newRange
+        }
+    }
+
+    private func convertCursor(at point: NSPoint, to kind: NSString.EnumerationOptions) {
+        DLog("convert cursor at \(point). Cursors before: \(String(describing: _multiCursorSelectedRanges))")
+        guard let range = glyphRange(atPoint: point) else {
+            DLog("no range")
+            return
+        }
+        DLog("  range is \(range)")
+        guard let (index, originalRange) = _multiCursorSelectedRanges?.enumerated().first(where: { tuple in
+            let (_, selectionRange) = tuple
+            if selectionRange.length == 0 {
+                return selectionRange.location == range.location
+            }
+            return selectionRange.contains(range.location)
+        }) else {
+            DLog("  no cursor at that location")
+            return
+        }
+        DLog("  cursor \(index) is there")
+        var temp = _multiCursorSelectedRanges!
+        if kind == .byCaretPositions {
+            temp[index] = originalRange
+        } else if kind == .byWords {
+            temp[index] = extendWordLeft(extendWordRight(originalRange))
+        } else if kind == .byParagraphs {
+            temp[index] = extendParagraphLeft(extendParagraphRight(originalRange))
+        } else {
+            fatalError()
+        }
+        temp.sort { lhs, rhs in
+            return lhs.location < rhs.location
+        }
+        let newCursors = temp.uniq
+        DLog("  new cursors: \(newCursors)")
+        safelySetSelectedRanges(newCursors)
     }
 
     private func safelySetSelectedRanges(_ ranges: [NSRange]) {
@@ -299,10 +418,19 @@ extension MultiCursorTextView {
         }
         if !hasMarkedText() {
             mutate {
-                selectedRanges = ranges.map { NSValue(range: $0) }
+                let newRanges = ranges.map { NSValue(range: $0) }
+                if optionDrag != nil {
+                    setSelectedRanges(newRanges, affinity: .downstream, stillSelecting: true)
+                } else {
+                    selectedRanges = newRanges
+                }
             }
         }
         DLog("Selected ranges is now \(multiCursorSelectedRanges)")
+        for range in _multiCursorSelectedRanges ?? [] {
+            let boundingRect = layoutManager!.boundingRect(forGlyphRange: range, in: textContainer!)
+            setNeedsDisplay(boundingRect)
+        }
     }
 
     private func split(_ range: NSRange, in containingRect: NSRect) -> [NSRange] {
@@ -805,6 +933,7 @@ extension MultiCursorTextView {
             }
         }
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelectingFlag)
+        DLog("super.setSelectedRanges(\(ranges)). selectedRange is \(selectedRange()) stillSelectingFlag=\(stillSelectingFlag)")
     }
 }
 

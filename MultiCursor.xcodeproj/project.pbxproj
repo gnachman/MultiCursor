@@ -19,6 +19,7 @@
 		A678FEB727F4D0D700BEF8FA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A678FEB627F4D0D700BEF8FA /* Assets.xcassets */; };
 		A678FEBA27F4D0D700BEF8FA /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A678FEB827F4D0D700BEF8FA /* Main.storyboard */; };
 		A678FEC227F4D0ED00BEF8FA /* MultiCursorTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A678FEC127F4D0ED00BEF8FA /* MultiCursorTextView.swift */; };
+		A6D10E0227F7AAE20026DB56 /* NSEvent+MultiCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D10E0127F7AAE20026DB56 /* NSEvent+MultiCursor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +37,7 @@
 		A678FEB927F4D0D700BEF8FA /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		A678FEBB27F4D0D700BEF8FA /* MultiCursor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MultiCursor.entitlements; sourceTree = "<group>"; };
 		A678FEC127F4D0ED00BEF8FA /* MultiCursorTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiCursorTextView.swift; sourceTree = "<group>"; };
+		A6D10E0127F7AAE20026DB56 /* NSEvent+MultiCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSEvent+MultiCursor.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +83,7 @@
 				A678FEB427F4D0D600BEF8FA /* ViewController.swift */,
 				A635CD2727F6DAE600434664 /* StringProtocol+MultiCursor.swift */,
 				A635CD2927F6DAF300434664 /* Array+MultiCursor.swift */,
+				A6D10E0127F7AAE20026DB56 /* NSEvent+MultiCursor.swift */,
 			);
 			path = MultiCursor;
 			sourceTree = "<group>";
@@ -157,6 +160,7 @@
 			files = (
 				A635CD1E27F6D7C200434664 /* NSRect+MultiCursor.swift in Sources */,
 				A635CD1C27F6D7B400434664 /* NSSIze+MultiCursor.swift in Sources */,
+				A6D10E0227F7AAE20026DB56 /* NSEvent+MultiCursor.swift in Sources */,
 				A635CD2027F6D7D200434664 /* NSRange+MultiCursor.swift in Sources */,
 				A635CD2A27F6DAF300434664 /* Array+MultiCursor.swift in Sources */,
 				A678FEB527F4D0D600BEF8FA /* ViewController.swift in Sources */,
