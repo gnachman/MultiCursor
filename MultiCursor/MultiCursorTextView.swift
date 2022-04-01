@@ -40,6 +40,8 @@ class MultiCursorTextView: NSTextView {
     private var savedInsertionPointColor: NSColor? = nil
     var caretVisible = true  // true when blinking on, false when blinking off
     private var timer: Timer? = nil
+    private var cursorsBeforeMarkedText: [NSRange]? = nil
+    private var inUndoable = false
     private var _multiCursorSelectedRanges: [NSRange]? = nil {
         willSet {
             redrawCursors()
@@ -256,8 +258,10 @@ extension MultiCursorTextView {
         } else {
             _multiCursorSelectedRanges = ranges
         }
-        mutate {
-            selectedRanges = ranges.map { NSValue(range: $0) }
+        if !hasMarkedText() {
+            mutate {
+                selectedRanges = ranges.map { NSValue(range: $0) }
+            }
         }
         DLog("Selected ranges is now \(multiCursorSelectedRanges)")
     }
@@ -401,7 +405,16 @@ extension MultiCursorTextView {
         return layoutManager!.lineFragmentRect(forGlyphAt: location, effectiveRange: effectiveGlyphRange)
     }
 
-    private func undoable<T>(_ closure: () throws -> T) rethrows -> T {
+    private func undoable<T>(force: Bool = false, _ closure: () throws -> T) rethrows -> T {
+        if inUndoable {
+            return try closure()
+        }
+
+        precondition(!inUndoable)
+        inUndoable = true
+        defer {
+            inUndoable = false
+        }
         if let ranges = _multiCursorSelectedRanges {
             undoManager?.beginUndoGrouping()
             undoManager?.registerUndo(withTarget: self, handler: { textView in
@@ -410,6 +423,13 @@ extension MultiCursorTextView {
             defer { undoManager?.endUndoGrouping()}
             let result = try closure()
             return result
+        }
+        if force {
+            undoManager?.beginUndoGrouping()
+            defer {
+                undoManager?.endUndoGrouping()
+            }
+            return try closure()
         }
         return try closure()
     }
@@ -1153,13 +1173,45 @@ extension MultiCursorTextView {
 }
 
 // MARK: - Insertion
+
 extension MultiCursorTextView {
     override func insertText(_ insertString: Any) {
+        if hasMarkedText() {
+            undoable(force: true) {
+                let markedCharacterRange = markedRange()
+                safelyReplaceCharacters(in: markedCharacterRange, with: insertString as! String)
+                let maybeCursorsBeforeUnmarkedText = cursorsBeforeMarkedText
+                unmarkText()
+                if let cursors = maybeCursorsBeforeUnmarkedText {
+                    _multiCursorSelectedRanges = cursors
+                    undoable {
+                        let originalGlyphRange = layoutManager!.glyphRange(forCharacterRange: cursors[0],
+                                                                           actualCharacterRange: nil)
+                        let replacementRange = NSRange(location: originalGlyphRange.location,
+                                                       length: (insertString as! NSString).length)
+                        // Fix up _multiCursorSelectedRanges for the newly inserted text at the first range.
+                        didModifySubstringLength(originalCharacterRange: originalGlyphRange,
+                                                 newCharacterRange: replacementRange)
+                        // Then remove it
+                        mutate {
+                            safelyReplaceCharacters(in: replacementRange, with: "")
+                        }
+                        // And append it at all locations
+                        insert(string: insertString, atGlyphRanges: cursors)
+                    }
+                }
+            }
+            return
+        }
         guard let ranges = _multiCursorSelectedRanges else {
             super.insertText(insertString, replacementRange: selectedRange())
             return
         }
 
+        insert(string: insertString, atGlyphRanges: ranges)
+    }
+
+    private func insert(string insertString: Any, atGlyphRanges ranges: [NSRange]) {
         let stringLength: Int
         if let string = insertString as? String {
             stringLength = string.utf16.count
@@ -1175,22 +1227,22 @@ extension MultiCursorTextView {
         }
 
         undoable {
-            settingMultiCursorSelectedRanges = true
-            var delta = 0
-            for preCharacterRange in preCharacterRanges {
-                var characterRange = preCharacterRange
-                characterRange.location -= delta
-                delta += characterRange.length - stringLength
+            mutate {
+                var delta = 0
+                for preCharacterRange in preCharacterRanges {
+                    var characterRange = preCharacterRange
+                    characterRange.location -= delta
+                    delta += characterRange.length - stringLength
 
-                if let string = insertString as? String {
-                    multiCursorReplaceCharacters(in: characterRange, with: string)
-                } else if let string = insertString as? NSAttributedString {
-                    multiCursorReplaceCharacters(in: characterRange, with: string.string)
+                    if let string = insertString as? String {
+                        multiCursorReplaceCharacters(in: characterRange, with: string)
+                    } else if let string = insertString as? NSAttributedString {
+                        multiCursorReplaceCharacters(in: characterRange, with: string.string)
+                    }
+
+                    selectionCharacterRanges.append(NSMakeRange(characterRange.location + stringLength, 0))
                 }
-
-                selectionCharacterRanges.append(NSMakeRange(characterRange.location + stringLength, 0))
             }
-            settingMultiCursorSelectedRanges = false
             safelySetSelectedRanges(selectionCharacterRanges.map {
                 layoutManager!.glyphRange(forCharacterRange: $0, actualCharacterRange: nil)
             })
@@ -1650,12 +1702,39 @@ extension MultiCursorTextView {
 
 // MARK: - New APIs
 extension MultiCursorTextView {
-    public func multiCursorReplaceCharacters(in range: NSRange, with replacement: String) {
+    public func safelyReplaceCharacters(in range: NSRange, with replacement: String) {
+        if !multiCursorReplaceCharacters(in: range, with: replacement) {
+            return
+        }
+        didModifySubstringLength(originalCharacterRange: range,
+                                 newCharacterRange: NSRange(location: range.location,
+                                                            length: (replacement as NSString).length))
+    }
+
+    @discardableResult
+    public func multiCursorReplaceCharacters(in range: NSRange, with replacement: String) -> Bool {
         if shouldChangeText(in: range, replacementString: replacement) {
             textStorage?.beginEditing()
             textStorage?.replaceCharacters(in: range, with: replacement)
             textStorage?.endEditing()
             didChangeText()
+            return true
         }
+        return false
     }
 }
+
+// MARK:- Marked Text
+
+extension MultiCursorTextView {
+    override func setMarkedText(_ stringOrAttributedString: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        cursorsBeforeMarkedText = cursorsBeforeMarkedText ?? _multiCursorSelectedRanges
+        super.setMarkedText(stringOrAttributedString, selectedRange: selectedRange, replacementRange: replacementRange)
+
+    }
+
+    override func unmarkText() {
+        cursorsBeforeMarkedText = nil
+    }
+}
+
