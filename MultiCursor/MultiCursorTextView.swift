@@ -174,7 +174,14 @@ extension MultiCursorTextView {
 
 // MARK: - Mouse
 extension MultiCursorTextView {
+    private func isControlShiftClick(_ event: NSEvent) -> Bool {
+        return event.modifierFlags.intersection([.command, .option, .shift, .control]) == [.control, .shift]
+    }
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1 && isControlShiftClick(event) {
+            addCursor(at: convert(event.locationInWindow, from: nil))
+            return
+        }
         guard event.modifierFlags.contains(.option) else {
             super.mouseDown(with: event)
             return
@@ -183,6 +190,22 @@ extension MultiCursorTextView {
         let point = convert(event.locationInWindow, from: nil)
         optionDrag = Drag(point)
         updateSelectedRanges(optionDrag!)
+    }
+
+    @objc(rightMouseDown:)
+    override func rightMouseDown(with event: NSEvent) {
+        if event.clickCount == 1 && isControlShiftClick(event) {
+            addCursor(at: convert(event.locationInWindow, from: nil))
+            return
+        }
+        super.rightMouseDown(with: event)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        if event.clickCount == 1 && isControlShiftClick(event) {
+            return nil
+        }
+        return super.menu(for: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -245,6 +268,22 @@ extension MultiCursorTextView {
         let ranges = split(range, in: rect)
         DLog("updateSelectedRanges: Set selected ranges to \(ranges)")
         safelySetSelectedRanges(ranges)
+    }
+
+    private func addCursor(at point: NSPoint) {
+        let rect = NSRect(origin: point,
+                          size: NSSize(width: 1, height: 1))
+        let range = layoutManager!.glyphRange(forBoundingRect: rect,
+                                              in: textContainer!)
+        if range.location == NSNotFound {
+            return
+        }
+        let ranges = split(range, in: rect)
+        let temp = (_multiCursorSelectedRanges ?? [selectedRange()]) + [ranges[0]]
+        let sorted = temp.sorted { lhs, rhs in
+            return lhs.location < rhs.location
+        }.uniq
+        safelySetSelectedRanges(sorted)
     }
 
     private func safelySetSelectedRanges(_ ranges: [NSRange]) {
@@ -743,6 +782,15 @@ extension MultiCursorTextView {
         return i
     }
 
+    private func glyphIndexOnLineAbove(glyphIndex: Int) -> Int? {
+        let rect = self.rect(for: NSRange(location: glyphIndex, length: 0))!
+        let i = layoutManager!.glyphIndex(for: rect.neighborAbove.maxPointWithinRect, in: textContainer!, fractionOfDistanceThroughGlyph: nil)
+        let sanityCheckRect = layoutManager!.boundingRect(forGlyphRange: NSRange(location: i, length: 1), in: textContainer!)
+        if sanityCheckRect.minY == rect.minY {
+            return nil
+        }
+        return i
+    }
 }
 
 // MARK: - NSTextView
@@ -964,6 +1012,50 @@ extension MultiCursorTextView {
         }
     }
 
+    private func eventIsAddCursorBelow(_ event: NSEvent) -> Bool {
+        if event.characters?.first == Character(Unicode.Scalar(NSDownArrowFunctionKey)!) &&
+            event.modifierFlags.intersection([.command, .option, .shift, .control]) == [.shift, .control] {
+            return true
+        }
+        return false
+    }
+
+    private func eventIsAddCursorAbove(_ event: NSEvent) -> Bool {
+        if event.characters?.first == Character(Unicode.Scalar(NSUpArrowFunctionKey)!) &&
+            event.modifierFlags.intersection([.command, .option, .shift, .control]) == [.shift, .control] {
+            return true
+        }
+        return false
+    }
+
+    private func handleSpecialKeyDown(_ event: NSEvent) -> Bool {
+        let (below, above) = (eventIsAddCursorBelow(event), eventIsAddCursorAbove(event))
+        if !below && !above {
+            return false
+        }
+        let existingRanges = _multiCursorSelectedRanges ?? selectedRanges.map { $0.rangeValue }
+        let lastExistingCursorLocation = existingRanges.last!.location
+        let maybeGlyphIndexForNewCursor: Int?
+        if below {
+            maybeGlyphIndexForNewCursor = glyphIndexOnLineBelow(glyphIndex: lastExistingCursorLocation)
+        } else if above {
+            maybeGlyphIndexForNewCursor = glyphIndexOnLineAbove(glyphIndex: lastExistingCursorLocation)
+        } else {
+            maybeGlyphIndexForNewCursor = nil
+        }
+        guard let glyphIndexForNewCursor = maybeGlyphIndexForNewCursor else {
+            return false
+        }
+        safelySetSelectedRanges(existingRanges + [NSRange(location: glyphIndexForNewCursor, length: 0)])
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if handleSpecialKeyDown(event) {
+            return
+        }
+        super.keyDown(with: event)
+    }
     override func moveDown(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveDown(sender)

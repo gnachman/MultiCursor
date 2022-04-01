@@ -24,6 +24,10 @@ extension NSRect {
         // A same-size rect just under us (larger Y)
         return NSRect(x: minX, y: maxY, width: width, height: height)
     }
+    var neighborAbove: NSRect {
+        // A same-size rect just under us (larger Y)
+        return NSRect(x: minX, y: minY - height, width: width, height: height)
+    }
     var maxPointWithinRect: NSPoint {
         return NSPoint(x: maxX - 1, y: maxY - 1)
     }
