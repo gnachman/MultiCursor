@@ -26,7 +26,7 @@ fileprivate struct Drag {
 
 
 @objc
-class MultiCursorTextView: NSTextView {
+open class MultiCursorTextView: NSTextView {
     static var logger = MultiCursorTextViewLogging()
     private func DLog(_ messageBlock: @autoclosure () -> String,
                       file: String = #file,
@@ -87,14 +87,14 @@ class MultiCursorTextView: NSTextView {
     private var settingMultiCursorSelectedRanges = false
     private let tabStop = 4
 
-    required init?(coder: NSCoder) {
+    required public init?(coder: NSCoder) {
         super.init(coder: coder)
     }
 }
 
 // MARK: - Drawing
 extension MultiCursorTextView {
-    override func setNeedsDisplay(_ invalidRect: NSRect) {
+    open override func setNeedsDisplay(_ invalidRect: NSRect) {
         super.setNeedsDisplay(invalidRect)
     }
 
@@ -121,7 +121,7 @@ extension MultiCursorTextView {
         return ud
     }
 
-    override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
+    open override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
         super.updateInsertionPointStateAndRestartTimer(restartFlag)
         if restartFlag && _multiCursorSelectedRanges != nil {
             timer?.invalidate()
@@ -145,7 +145,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override var insertionPointColor: NSColor {
+    open override var insertionPointColor: NSColor {
         get {
             return super.insertionPointColor
         }
@@ -171,7 +171,7 @@ extension MultiCursorTextView {
         } ?? []
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    open override func draw(_ dirtyRect: NSRect) {
         DLog("draw \(dirtyRect)")
         super.draw(dirtyRect)
 
@@ -197,7 +197,7 @@ extension MultiCursorTextView {
         let point = convert(event.locationInWindow, from: nil)
         if event.clickCount == 1 {
             if let index = addCursor(at: point) {
-                optionDrag = .controlShift(index: index, kind: .byCaretPositions)
+                optionDrag = .controlShift(index: index, kind: .byComposedCharacterSequences)
             }
         } else if event.clickCount == 2 {
             convertCursor(at: point, to: .byWords)
@@ -208,7 +208,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func mouseDown(with event: NSEvent) {
+    open override func mouseDown(with event: NSEvent) {
         NSLog("mouseDown \(event)")
         if event.clickCount == 1 {
             optionDrag = nil
@@ -230,7 +230,7 @@ extension MultiCursorTextView {
     }
 
     @objc(rightMouseDown:)
-    override func rightMouseDown(with event: NSEvent) {
+    open override func rightMouseDown(with event: NSEvent) {
         if event.clickCount == 1 {
             optionDrag = nil
         }
@@ -241,14 +241,14 @@ extension MultiCursorTextView {
         super.rightMouseDown(with: event)
     }
 
-    override func menu(for event: NSEvent) -> NSMenu? {
+    open override func menu(for event: NSEvent) -> NSMenu? {
         if isControlShiftClick(event) {
             return nil
         }
         return super.menu(for: event)
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    open override func mouseDragged(with event: NSEvent) {
         switch optionDrag {
         case .none:
             break
@@ -269,7 +269,7 @@ extension MultiCursorTextView {
             guard var glyphIndex = self.glyphRange(atPoint: point)?.location else {
                 break
             }
-            if kind == .byCaretPositions {
+            if kind == .byComposedCharacterSequences {
                 // No change
             } else if kind == .byWords {
                 glyphIndex = extendWordRight(NSRange(location: glyphIndex, length: 0)).upperBound
@@ -285,7 +285,7 @@ extension MultiCursorTextView {
         super.mouseDragged(with: event)
     }
 
-    override func mouseUp(with event: NSEvent) {
+    open override func mouseUp(with event: NSEvent) {
         NSLog("mouse up \(event)")
         if optionDrag != nil {
             DLog("Finish drag at \(String(describing: optionDrag!))")
@@ -388,7 +388,7 @@ extension MultiCursorTextView {
         }
         DLog("  cursor \(index) is there")
         var temp = _multiCursorSelectedRanges!
-        if kind == .byCaretPositions {
+        if kind == .byComposedCharacterSequences {
             temp[index] = originalRange
         } else if kind == .byWords {
             temp[index] = extendWordLeft(extendWordRight(originalRange))
@@ -923,7 +923,7 @@ extension MultiCursorTextView {
 
 // MARK: - NSTextView
 extension MultiCursorTextView {
-    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
+    open override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
         if !settingMultiCursorSelectedRanges {
             DLog("Surprise! Setting ranges not by me to \(ranges).")
             if ranges.count < 2 {
@@ -940,7 +940,7 @@ extension MultiCursorTextView {
 // MARK: - Movement
 extension MultiCursorTextView {
     // MARK: - Glyph-wise movement
-    override func moveLeft(_ sender: Any?) {
+    open override func moveLeft(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveLeft(sender)
             return
@@ -951,7 +951,7 @@ extension MultiCursorTextView {
         updateInsertionPointStateAndRestartTimer(true)
     }
 
-    override func moveRight(_ sender: Any?) {
+    open override func moveRight(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveRight(sender)
             return
@@ -964,26 +964,26 @@ extension MultiCursorTextView {
     }
 
     // TODO: RTL
-    override func moveForward(_ sender: Any?) {
+    open override func moveForward(_ sender: Any?) {
         moveRight(sender)
     }
 
     // TODO: RTL
-    override func moveBackward(_ sender: Any?) {
+    open override func moveBackward(_ sender: Any?) {
         moveLeft(sender)
     }
 
     // MARK: Selection Modifying
 
-    override func moveLeftAndModifySelection(_ sender: Any?) {
+    open override func moveLeftAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveBackwardAndModifySelection(sender)
             return
         }
-        moveLeftAndModifySelection(by: .byCaretPositions)
+        moveLeftAndModifySelection(by: .byComposedCharacterSequences)
     }
 
-    override func moveBackwardAndModifySelection(_ sender: Any?) {
+    open override func moveBackwardAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveBackwardAndModifySelection(sender)
             return
@@ -991,24 +991,24 @@ extension MultiCursorTextView {
         moveLeftAndModifySelection(sender)
     }
 
-    override func moveRightAndModifySelection(_ sender: Any?) {
+    open override func moveRightAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveRightAndModifySelection(sender)
             return
         }
-        moveRightAndModifySelection(by: .byCaretPositions)
+        moveRightAndModifySelection(by: .byComposedCharacterSequences)
     }
 
-    override func moveForwardAndModifySelection(_ sender: Any?) {
+    open override func moveForwardAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveForwardAndModifySelection(sender)
             return
         }
-        moveRightAndModifySelection(by: .byCaretPositions)
+        moveRightAndModifySelection(by: .byComposedCharacterSequences)
     }
 
     // MARK: - Word-wise movement
-    override func moveWordRight(_ sender: Any?) {
+    open override func moveWordRight(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveWordForward(sender)
             return
@@ -1016,7 +1016,7 @@ extension MultiCursorTextView {
         moveRight(by: .byWords)
     }
 
-    override func moveWordLeft(_ sender: Any?) {
+    open override func moveWordLeft(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveWordLeft(sender)
             return
@@ -1024,17 +1024,17 @@ extension MultiCursorTextView {
         moveLeft(by: .byWords)
     }
 
-    override func moveWordForward(_ sender: Any?) {
+    open override func moveWordForward(_ sender: Any?) {
         moveWordRight(sender)
     }
 
-    override func moveWordBackward(_ sender: Any?) {
+    open override func moveWordBackward(_ sender: Any?) {
         moveWordLeft(sender)
     }
 
     // MARK: Selection Modifying
 
-    override func moveWordForwardAndModifySelection(_ sender: Any?) {
+    open override func moveWordForwardAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveWordForwardAndModifySelection(sender)
             return
@@ -1042,7 +1042,7 @@ extension MultiCursorTextView {
         moveRightAndModifySelection(by: .byWords)
     }
 
-    override func moveWordRightAndModifySelection(_ sender: Any?) {
+    open override func moveWordRightAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveWordRightAndModifySelection(sender)
             return
@@ -1050,7 +1050,7 @@ extension MultiCursorTextView {
         moveRightAndModifySelection(by: .byWords)
     }
 
-    override func moveWordBackwardAndModifySelection(_ sender: Any?) {
+    open override func moveWordBackwardAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveWordBackwardAndModifySelection(sender)
             return
@@ -1058,7 +1058,7 @@ extension MultiCursorTextView {
         moveLeftAndModifySelection(by: .byWords)
     }
 
-    override func moveWordLeftAndModifySelection(_ sender: Any?) {
+    open override func moveWordLeftAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveWordBackwardAndModifySelection(sender)
             return
@@ -1069,7 +1069,7 @@ extension MultiCursorTextView {
 
     // MARK: - Paragraph-wise movement
 
-    override func moveToBeginningOfParagraph(_ sender: Any?) {
+    open override func moveToBeginningOfParagraph(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToBeginningOfParagraph(sender)
             return
@@ -1077,7 +1077,7 @@ extension MultiCursorTextView {
         moveLeft(by: .byParagraphs)
     }
 
-    override func moveToEndOfParagraph(_ sender: Any?) {
+    open override func moveToEndOfParagraph(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToEndOfParagraph(sender)
             return
@@ -1087,7 +1087,7 @@ extension MultiCursorTextView {
 
     // MARK: Selection Modifying
 
-    override func moveToBeginningOfParagraphAndModifySelection(_ sender: Any?) {
+    open override func moveToBeginningOfParagraphAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToBeginningOfParagraphAndModifySelection(sender)
             return
@@ -1095,7 +1095,7 @@ extension MultiCursorTextView {
         moveLeftAndModifySelection(by: .byParagraphs)
     }
 
-    override func moveToEndOfParagraphAndModifySelection(_ sender: Any?) {
+    open override func moveToEndOfParagraphAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToEndOfParagraphAndModifySelection(sender)
             return
@@ -1103,7 +1103,7 @@ extension MultiCursorTextView {
         moveRightAndModifySelection(by: .byParagraphs)
     }
 
-    override func moveParagraphForwardAndModifySelection(_ sender: Any?) {
+    open override func moveParagraphForwardAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveParagraphForwardAndModifySelection(sender)
             return
@@ -1111,7 +1111,7 @@ extension MultiCursorTextView {
         moveRightAndModifySelection(by: .byParagraphs)
     }
 
-    override func moveParagraphBackwardAndModifySelection(_ sender: Any?) {
+    open override func moveParagraphBackwardAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveParagraphBackwardAndModifySelection(sender)
             return
@@ -1121,7 +1121,7 @@ extension MultiCursorTextView {
 
     // MARK: - Line-wise movement
 
-    override func moveUp(_ sender: Any?) {
+    open override func moveUp(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveUp(sender)
             return
@@ -1179,13 +1179,13 @@ extension MultiCursorTextView {
         return true
     }
 
-    override func keyDown(with event: NSEvent) {
+    open override func keyDown(with event: NSEvent) {
         if handleSpecialKeyDown(event) {
             return
         }
         super.keyDown(with: event)
     }
-    override func moveDown(_ sender: Any?) {
+    open override func moveDown(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveDown(sender)
             return
@@ -1207,7 +1207,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func moveToBeginningOfLine(_ sender: Any?) {
+    open override func moveToBeginningOfLine(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToBeginningOfLine(sender)
             return
@@ -1217,7 +1217,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func moveToEndOfLine(_ sender: Any?) {
+    open override func moveToEndOfLine(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToEndOfLine(sender)
             return
@@ -1227,7 +1227,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func moveToLeftEndOfLine(_ sender: Any?) {
+    open override func moveToLeftEndOfLine(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToLeftEndOfLine(sender)
             return
@@ -1235,7 +1235,7 @@ extension MultiCursorTextView {
         moveToBeginningOfLine(sender)
     }
 
-    override func moveToRightEndOfLine(_ sender: Any?) {
+    open override func moveToRightEndOfLine(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToRightEndOfLine(sender)
             return
@@ -1245,7 +1245,7 @@ extension MultiCursorTextView {
 
     // MARK: Selection Modifying
 
-    override func moveUpAndModifySelection(_ sender: Any?) {
+    open override func moveUpAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveUpAndModifySelection(sender)
             return
@@ -1265,7 +1265,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func moveDownAndModifySelection(_ sender: Any?) {
+    open override func moveDownAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveDownAndModifySelection(sender)
             return
@@ -1287,7 +1287,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func moveToBeginningOfLineAndModifySelection(_ sender: Any?) {
+    open override func moveToBeginningOfLineAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToBeginningOfLineAndModifySelection(sender)
             return
@@ -1297,7 +1297,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func moveToEndOfLineAndModifySelection(_ sender: Any?) {
+    open override func moveToEndOfLineAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToEndOfLineAndModifySelection(sender)
             return
@@ -1307,7 +1307,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func moveToLeftEndOfLineAndModifySelection(_ sender: Any?) {
+    open override func moveToLeftEndOfLineAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToLeftEndOfLineAndModifySelection(sender)
             return
@@ -1315,7 +1315,7 @@ extension MultiCursorTextView {
         moveToBeginningOfLineAndModifySelection(sender)
     }
 
-    override func moveToRightEndOfLineAndModifySelection(_ sender: Any?) {
+    open override func moveToRightEndOfLineAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.moveToRightEndOfLineAndModifySelection(sender)
             return
@@ -1325,7 +1325,7 @@ extension MultiCursorTextView {
 
     // MARK: - Document-wise movement
 
-    override func moveToEndOfDocumentAndModifySelection(_ sender: Any?) {
+    open override func moveToEndOfDocumentAndModifySelection(_ sender: Any?) {
         guard let firstRange = _multiCursorSelectedRanges?.first else {
             super.moveToEndOfDocumentAndModifySelection(sender)
             return
@@ -1337,7 +1337,7 @@ extension MultiCursorTextView {
 
     // MARK: Selection Modifying
 
-    override func moveToBeginningOfDocumentAndModifySelection(_ sender: Any?) {
+    open override func moveToBeginningOfDocumentAndModifySelection(_ sender: Any?) {
         guard let lastRange = _multiCursorSelectedRanges?.last else {
             super.moveToBeginningOfDocumentAndModifySelection(sender)
             return
@@ -1348,7 +1348,7 @@ extension MultiCursorTextView {
 
     // MARK: - Page-wise movement
 
-    override func pageDownAndModifySelection(_ sender: Any?) {
+    open override func pageDownAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.pageDownAndModifySelection(sender)
             return
@@ -1370,7 +1370,7 @@ extension MultiCursorTextView {
         scrollPageDown(nil)
     }
 
-    override func pageUpAndModifySelection(_ sender: Any?) {
+    open override func pageUpAndModifySelection(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.pageUpAndModifySelection(sender)
             return
@@ -1396,7 +1396,7 @@ extension MultiCursorTextView {
 // MARK: - Insertion
 
 extension MultiCursorTextView {
-    override func insertText(_ insertString: Any) {
+    open override func insertText(_ insertString: Any) {
         if hasMarkedText() {
             undoable(force: true) {
                 let markedCharacterRange = markedRange()
@@ -1470,7 +1470,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertNewline(_ sender: Any?) {
+    open override func insertNewline(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertNewline(sender)
         } else {
@@ -1478,7 +1478,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertParagraphSeparator(_ sender: Any?) {
+    open override func insertParagraphSeparator(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertParagraphSeparator(sender)
         } else {
@@ -1487,7 +1487,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertLineBreak(_ sender: Any?) {
+    open override func insertLineBreak(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertLineBreak(sender)
         } else {
@@ -1495,7 +1495,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertContainerBreak(_ sender: Any?) {
+    open override func insertContainerBreak(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertContainerBreak(sender)
         } else {
@@ -1503,7 +1503,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertSingleQuoteIgnoringSubstitution(_ sender: Any?) {
+    open override func insertSingleQuoteIgnoringSubstitution(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertSingleQuoteIgnoringSubstitution(sender)
         } else {
@@ -1512,7 +1512,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertDoubleQuoteIgnoringSubstitution(_ sender: Any?) {
+    open override func insertDoubleQuoteIgnoringSubstitution(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertDoubleQuoteIgnoringSubstitution(sender)
         } else {
@@ -1524,7 +1524,7 @@ extension MultiCursorTextView {
 
 // MARK: - Tranposition
 extension MultiCursorTextView {
-    override func transpose(_ sender: Any?) {
+    open override func transpose(_ sender: Any?) {
         guard let ranges = _multiCursorSelectedRanges else {
             super.transpose(sender)
             return
@@ -1558,7 +1558,7 @@ extension MultiCursorTextView {
 extension MultiCursorTextView {
     // I don't implement insertTabIgnoringFieldEditor: because I think it's irrelevant for NSTextView.
 
-    override func indent(_ sender: Any?) {
+    open override func indent(_ sender: Any?) {
         let ranges = _multiCursorSelectedRanges ?? selectedRanges.map { $0.rangeValue }
         if NSTextView.instancesRespond(to: #selector(indent(_:))) && ranges.count == 1 {
             super.indent(sender)
@@ -1572,7 +1572,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertBacktab(_ sender: Any?) {
+    open override func insertBacktab(_ sender: Any?) {
         undoable {
             let ranges = _multiCursorSelectedRanges ?? selectedRanges.map { $0.rangeValue }
             let nsstring = textStorage!.string as NSString
@@ -1634,11 +1634,11 @@ extension MultiCursorTextView {
         }
     }
 
-    override func insertTab(_ sender: Any?) {
+    open override func insertTab(_ sender: Any?) {
         insertText(String(repeating: " ", count: tabStop))
     }
 
-    override func insertTabIgnoringFieldEditor(_ sender: Any?) {
+    open override func insertTabIgnoringFieldEditor(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.insertTabIgnoringFieldEditor(sender)
         } else {
@@ -1650,7 +1650,7 @@ extension MultiCursorTextView {
 // MARK: - Case Transformation
 extension MultiCursorTextView {
     // I don't implement changeCaseOfLetter: because NSTextView does not support it
-    override func uppercaseWord(_ sender: Any?) {
+    open override func uppercaseWord(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.uppercaseWord(sender)
             return
@@ -1658,7 +1658,7 @@ extension MultiCursorTextView {
         transformWordInPlace { $0.uppercased() }
     }
 
-    override func lowercaseWord(_ sender: Any?) {
+    open override func lowercaseWord(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.lowercaseWord(sender)
             return
@@ -1666,7 +1666,7 @@ extension MultiCursorTextView {
         transformWordInPlace { $0.lowercased() }
     }
 
-    override func capitalizeWord(_ sender: Any?) {
+    open override func capitalizeWord(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.capitalizeWord(sender)
             return
@@ -1677,7 +1677,7 @@ extension MultiCursorTextView {
 
 // MARK: - Deletion
 extension MultiCursorTextView {
-    override func deleteForward(_ sender: Any?) {
+    open override func deleteForward(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteForward(sender)
             return
@@ -1689,7 +1689,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteBackward(_ sender: Any?) {
+    open override func deleteBackward(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteBackward(sender)
             return
@@ -1701,7 +1701,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func delete(_ sender: Any?) {
+    open override func delete(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.delete(sender)
             return
@@ -1713,7 +1713,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteBackwardByDecomposingPreviousCharacter(_ sender: Any?) {
+    open override func deleteBackwardByDecomposingPreviousCharacter(_ sender: Any?) {
         guard let glyphRanges = _multiCursorSelectedRanges else {
             super.deleteBackwardByDecomposingPreviousCharacter(sender)
             return
@@ -1736,7 +1736,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteWordForward(_ sender: Any?) {
+    open override func deleteWordForward(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteWordForward(sender)
             return
@@ -1748,7 +1748,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteWordBackward(_ sender: Any?) {
+    open override func deleteWordBackward(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteWordBackward(sender)
             return
@@ -1760,7 +1760,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteToBeginningOfLine(_ sender: Any?) {
+    open override func deleteToBeginningOfLine(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteToBeginningOfLine(sender)
             return
@@ -1772,7 +1772,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteToEndOfLine(_ sender: Any?) {
+    open override func deleteToEndOfLine(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteToEndOfLine(sender)
             return
@@ -1784,7 +1784,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteToBeginningOfParagraph(_ sender: Any?) {
+    open override func deleteToBeginningOfParagraph(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteToBeginningOfParagraph(sender)
             return
@@ -1796,7 +1796,7 @@ extension MultiCursorTextView {
         }
     }
 
-    override func deleteToEndOfParagraph(_ sender: Any?) {
+    open override func deleteToEndOfParagraph(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.deleteToEndOfParagraph(sender)
             return
@@ -1811,7 +1811,7 @@ extension MultiCursorTextView {
 
 // MARK: - Copy/Paste
 extension MultiCursorTextView {
-    override func paste(_ sender: Any?) {
+    open override func paste(_ sender: Any?) {
         let board = NSPasteboard.general
         guard board.availableType(from: [.multipleTextSelection]) == .multipleTextSelection,
               let string = board.string(forType: .string),
@@ -1880,7 +1880,7 @@ extension MultiCursorTextView {
         }
     }
 
-    internal override func copy(_ sender: Any?) {
+    open override func copy(_ sender: Any?) {
         guard let ranges = _multiCursorSelectedRanges else {
             super.copy(sender)
             return
@@ -1900,7 +1900,7 @@ extension MultiCursorTextView {
         pboard.writeObjects([string])
     }
 
-    override func cut(_ sender: Any?) {
+    open override func cut(_ sender: Any?) {
         guard _multiCursorSelectedRanges != nil else {
             super.cut(sender)
             return
@@ -1912,7 +1912,7 @@ extension MultiCursorTextView {
 
 // MARK: - Other NSResponder
 extension MultiCursorTextView {
-    override func cancelOperation(_ sender: Any?) {
+    open override func cancelOperation(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
             super.cancelOperation(sender)
             return
@@ -1948,13 +1948,13 @@ extension MultiCursorTextView {
 // MARK:- Marked Text
 
 extension MultiCursorTextView {
-    override func setMarkedText(_ stringOrAttributedString: Any, selectedRange: NSRange, replacementRange: NSRange) {
+    open override func setMarkedText(_ stringOrAttributedString: Any, selectedRange: NSRange, replacementRange: NSRange) {
         cursorsBeforeMarkedText = cursorsBeforeMarkedText ?? _multiCursorSelectedRanges
         super.setMarkedText(stringOrAttributedString, selectedRange: selectedRange, replacementRange: replacementRange)
 
     }
 
-    override func unmarkText() {
+    open override func unmarkText() {
         cursorsBeforeMarkedText = nil
     }
 }
