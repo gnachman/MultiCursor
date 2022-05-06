@@ -1941,7 +1941,7 @@ extension MultiCursorTextView {
 extension MultiCursorTextView {
     open override func cancelOperation(_ sender: Any?) {
         if _multiCursorSelectedRanges == nil {
-            super.cancelOperation(sender)
+            // NSTextView does not respond to -cancelOperation:
             return
         }
         safelySetSelectedRanges([_multiCursorSelectedRanges!.last!])
