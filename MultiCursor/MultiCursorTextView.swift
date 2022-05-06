@@ -738,7 +738,7 @@ extension MultiCursorTextView {
     }
 
     private func deleteRanges(closure: (Range<Int>) -> (Range<Int>)) {
-        guard let ranges = _multiCursorSelectedRanges else {
+        guard let ranges = sortedDisjointRanges else {
             return
         }
         settingMultiCursorSelectedRanges = true
@@ -878,6 +878,31 @@ extension MultiCursorTextView {
         var temp = _multiCursorSelectedRanges!
         temp[index] = range
         safelySetSelectedRanges(temp)
+    }
+
+    private var sortedDisjointRanges: [NSRange]? {
+        guard let ranges = _multiCursorSelectedRanges else {
+            return nil
+        }
+        var result = [NSRange]()
+        let sortedRanges = ranges.sorted { $0.lowerBound < $1.lowerBound }
+        for range in sortedRanges {
+            var indexes = [Int]()
+            for (i, existing) in result.enumerated() {
+                if Range(existing)!.overlaps(Range(range)!) {
+                    indexes.append(i)
+                }
+            }
+            var newRange = Range(range)!
+            for i in indexes.reversed() {
+                let toRemove = result[i]
+                newRange = min(toRemove.lowerBound, newRange.lowerBound) ..< max(toRemove.upperBound, newRange.upperBound)
+                result.remove(at: i)
+            }
+
+            result.append(NSRange(newRange))
+        }
+        return result
     }
 
     // It is safe to modify existing ranges in the closure, but don't add or delete them.
